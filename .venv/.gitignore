@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+*.xlsx
+*.xls
+*.log
+*.DS_Store
+*.idea/
