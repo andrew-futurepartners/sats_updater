@@ -71,6 +71,9 @@ def expand_pattern_columns(pattern_mappings, dest_codes):
     return expanded
 
 def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
+    import os
+    import re
+
     standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order = parse_data_mapping(mapping_file_path)
 
     df = pd.read_excel(sats_file_path, sheet_name=sheet_name)
@@ -82,12 +85,25 @@ def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
 
     # Merge everything into one master mapping for consistency
     full_mapping = {**standard_mappings, **expanded_1, **expanded_2}
-
     original_to_final_groups = (expanded_1, expanded_2)
 
-    return full_mapping, dest_codes, df, df.columns.tolist(), final_column_order, original_to_final_groups
+    # Extract year and wave from file name
+    base_name = os.path.basename(sats_file_path)
+    wave_label = ""
+    survey_year = ""
 
-def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups):
+    wave_match = re.search(r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})", base_name, re.IGNORECASE)
+    year_match = re.search(r"\b(20\d{2})\b", base_name)
+
+    if wave_match:
+        wave_label = wave_match.group(0).title()
+    if year_match:
+        survey_year = year_match.group(1)
+
+    return full_mapping, dest_codes, df, df.columns.tolist(), final_column_order, original_to_final_groups, wave_label, survey_year
+
+
+def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups, wave_label="", survey_year=""):
     import re
     records = []
 
@@ -95,7 +111,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
     df.columns = [col.strip().lower() for col in df.columns]
 
     for _, row in df.iterrows():
-        # 🔍 Extract destination names from the markers column
         markers = str(row.get("markers", ""))
         dest_city = None
         dest_state = None
@@ -108,7 +123,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
         if state_match:
             dest_state = state_match.group(1).strip()
 
-        # 🔁 Track found destinations from data columns
         found_dests_1 = set()
         found_dests_2 = set()
 
@@ -128,13 +142,15 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                 if colname in df.columns and pd.notna(row[colname]):
                     found_dests_2.add(dest_tag)
 
-        # 🧱 Shared demographic/static fields (no Lr tag)
         static_row_data = {}
         for col in df.columns:
             if col in full_map and not re.search(r"lr\d+", col):
                 static_row_data[full_map[col]] = row[col]
 
-        # 🏙 City destination records
+        # Add wave/year to all records
+        static_row_data["Wave"] = wave_label or pd.NA
+        static_row_data["HIDE Help"] = survey_year or pd.NA
+
         for dest in found_dests_1:
             row_data = static_row_data.copy()
             for original, final in mapping1.items():
@@ -146,7 +162,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                 row_data.setdefault(final_col, pd.NA)
             records.append(row_data)
 
-        # 🏛 State destination records
         for dest in found_dests_2:
             row_data = static_row_data.copy()
             for original, final in mapping2.items():
@@ -164,10 +179,10 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
 
 if __name__ == "__main__":
     mapping_file = "DataMapping.xlsx"
-    sats_file = "SATS original example.xlsx"
+    sats_file = "SATS JUNE 2025 example.xlsx"
 
     print("🔄 Building full mapping and loading data...")
-    full_map, dest_codes, df, all_columns, final_column_order, original_to_final_groups = build_full_mapping(mapping_file, sats_file)
+    full_map, dest_codes, df, all_columns, final_column_order, original_to_final_groups, wave_label, survey_year = build_full_mapping(mapping_file, sats_file)
 
     print(f"\n✅ Detected {len(dest_codes)} destination codes:")
     print(dest_codes)
@@ -177,11 +192,13 @@ if __name__ == "__main__":
         print(f"  {raw_col} → {final_col}")
 
     print("\n🔄 Reshaping data...")
-    reshaped_df = reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups)
+    reshaped_df = reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups, wave_label, survey_year)
 
     print(f"\n✅ Reshaped data: {reshaped_df.shape[0]} rows, {reshaped_df.shape[1]} columns")
     print(reshaped_df.head(3))
 
-    output_file = "SATS_final_output.xlsx"
+    safe_wave_label = wave_label.replace(" ", "_") if wave_label else "output"
+    output_file = f"{wave_label} SATS+ Output.xlsx" if wave_label else "SATS_final_output.xlsx"
+
     reshaped_df.to_excel(output_file, index=False)
     print(f"\n💾 Output written to: {output_file}")

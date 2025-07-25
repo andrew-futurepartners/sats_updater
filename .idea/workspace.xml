@@ -5,17 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/SATS+.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/DataMapping.xlsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/SATS JUNE 2025 DATA - FINAL CLEANED DATA.xlsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/SATS original example.xlsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/SATS_final_output.xlsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/sats_transform_script.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/SATS original example.xlsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/SATS_final_output.xlsx" beforeDir="false" afterPath="$PROJECT_DIR$/SATS_final_output.xlsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sats_transform_script.py" beforeDir="false" afterPath="$PROJECT_DIR$/sats_transform_script.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,15 +34,15 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.sats_transform_script.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "C:/Users/apier/PycharmProjects/SATS+"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.sats_transform_script.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/apier/PycharmProjects/SATS+&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\apier\PycharmProjects\SATS+" />
