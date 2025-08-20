@@ -3,18 +3,17 @@ import re
 import pandas as pd
 
 
-# ------------------------
-# Helpers, column resolver
-# ------------------------
+# =========================
+# Column resolution helpers
+# =========================
 
 def build_column_index(df: pd.DataFrame):
-    """Build fast, safe resolution from requested names to actual df columns.
-    Exact match wins. If lowercase is unique, allow case-insensitive match.
-    If lowercase is ambiguous (e.g., both Q2 and q2 exist), require exact case.
-    """
+    """Case-safe resolver. Exact wins. Also supports lowercase with and without trimmed spaces."""
     exact = set(df.columns)
     lower_map = {}
+    lower_strip_map = {}
     collisions = set()
+    collisions_strip = set()
 
     for c in df.columns:
         key = c.lower()
@@ -23,11 +22,18 @@ def build_column_index(df: pd.DataFrame):
         else:
             lower_map[key] = c
 
-    # Remove ambiguous keys from lower_map
+        key2 = c.lower().strip()
+        if key2 in lower_strip_map and lower_strip_map[key2] != c:
+            collisions_strip.add(key2)
+        else:
+            lower_strip_map[key2] = c
+
     for k in collisions:
         lower_map.pop(k, None)
+    for k in collisions_strip:
+        lower_strip_map.pop(k, None)
 
-    return {"exact": exact, "lower_map": lower_map, "collisions": collisions}
+    return {"exact": exact, "lower_map": lower_map, "lower_strip_map": lower_strip_map}
 
 
 def resolve_col(name: str, col_index):
@@ -35,20 +41,15 @@ def resolve_col(name: str, col_index):
     if name in col_index["exact"]:
         return name
     key = name.lower()
-    return col_index["lower_map"].get(key, None)
+    if key in col_index["lower_map"]:
+        return col_index["lower_map"][key]
+    key2 = name.lower().strip()
+    return col_index["lower_strip_map"].get(key2, None)
 
 
-def get_cell(row: pd.Series, col_name: str, col_index):
-    """Safely get a value by resolving the column name."""
-    actual = resolve_col(col_name, col_index)
-    if actual is None:
-        return None
-    return row.get(actual, None)
-
-
-# ------------------------
+# =====================
 # Mapping file parsing
-# ------------------------
+# =====================
 
 def parse_data_mapping(mapping_file_path):
     df = pd.read_excel(mapping_file_path)
@@ -71,8 +72,7 @@ def parse_data_mapping(mapping_file_path):
             if re.search(r"(LrNr|\{N\})", original_1, flags=re.IGNORECASE):
                 pattern_mappings_1.append({"pattern": original_1, "final_column": final})
             else:
-                # Keep original case, resolver will handle matching
-                standard_mappings[original_1] = final
+                standard_mappings[original_1] = final  # keep case, resolver handles Q2 vs q2
 
         # ORIGINAL_2
         original_2 = row.get("ORIGINAL_2")
@@ -86,9 +86,27 @@ def parse_data_mapping(mapping_file_path):
     return standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order
 
 
-# ------------------------
+# ===========================
+# SATS file loading utility
+# ===========================
+
+def _load_sats_dataframe(sats_file_path, sheet_name=None):
+    """Return (df, chosen_sheet). Prefer a sheet that contains a 'markers' column."""
+    xls = pd.ExcelFile(sats_file_path)
+    sheet_list = xls.sheet_names if sheet_name is None else [sheet_name]
+
+    for sn in sheet_list:
+        df_try = pd.read_excel(sats_file_path, sheet_name=sn)
+        if any(str(c).strip().lower() == "markers" for c in df_try.columns):
+            return df_try, sn
+
+    first_sn = sheet_list[0]
+    return pd.read_excel(sats_file_path, sheet_name=first_sn), first_sn
+
+
+# =======================
 # Destination utilities
-# ------------------------
+# =======================
 
 def extract_destination_codes(df: pd.DataFrame):
     dest_pattern = re.compile(r"_lr(\d+)", re.IGNORECASE)
@@ -97,7 +115,7 @@ def extract_destination_codes(df: pd.DataFrame):
         m = dest_pattern.search(col)
         if m:
             dest_nums.add(int(m.group(1)))
-    return [f"lr{n}" for n in sorted(dest_nums)]  # lr1, lr2, lr3, ...
+    return [f"lr{n}" for n in sorted(dest_nums)]  # lr1, lr2, ...
 
 
 def expand_pattern_columns(pattern_mappings, dest_codes):
@@ -125,27 +143,25 @@ def expand_pattern_columns(pattern_mappings, dest_codes):
     return expanded
 
 
-# ------------------------
-# Build mapping bundle
-# ------------------------
+# ==============================
+# Build mapping and data bundle
+# ==============================
 
 def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
     standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order = parse_data_mapping(mapping_file_path)
 
-    df = pd.read_excel(sats_file_path, sheet_name=sheet_name)  # keep original case
+    df, chosen_sheet = _load_sats_dataframe(sats_file_path, sheet_name=sheet_name)
     col_index = build_column_index(df)
 
     dest_codes = extract_destination_codes(df)
     expanded_1 = expand_pattern_columns(pattern_mappings_1, dest_codes)
     expanded_2 = expand_pattern_columns(pattern_mappings_2, dest_codes)
 
-    # Merge for reference only
     full_mapping = {}
     full_mapping.update({k: v for k, v in standard_mappings.items()})
     full_mapping.update(expanded_1)
     full_mapping.update(expanded_2)
 
-    # Extract wave and year from file name
     base_name = os.path.basename(sats_file_path)
     wave_label = ""
     survey_year = ""
@@ -159,7 +175,6 @@ def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
     if year_match:
         survey_year = year_match.group(1)
 
-    # Ensure metadata columns in final order
     for extra in ["Wave", "HIDE Help", "CITY_EVAL"]:
         if extra not in final_column_order:
             final_column_order.append(extra)
@@ -169,73 +184,69 @@ def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
     return full_mapping, dest_codes, df, list(df.columns), final_column_order, original_to_final_groups, wave_label, survey_year, col_index
 
 
-# ------------------------
-# Markers parsing
-# ------------------------
+# =========================
+# Markers parsing helpers
+# =========================
 
-def _get_marker_label(markers_str, label_type, n):
-    # label_type is "Destination" or "State", format is "<type> n/<value>"
+def _get_marker_label_from_blob(markers_str: str, label_type: str, n: int):
+    """
+    Extract the raw substring after the slash.
+    Examples:
+      "... ,/D Apollo Destination 1/Philadelphia__Pennsylvania, ..." -> "Philadelphia__Pennsylvania"
+      "... ,/D Apollo State 1/Illinois, ..."                        -> "Illinois"
+    No cleaning.
+    """
     if not isinstance(markers_str, str) or not markers_str:
         return pd.NA
-    m = re.search(rf"{label_type}\s*{n}/([^,]+)", markers_str, flags=re.IGNORECASE)
+    # Allow leading slash, allow any prefix up to "Destination 1/" or "State 1/"
+    # Stop at the next comma
+    pat = rf"(?:^|,)\s*/?[^,]*\b{label_type}\s*0*{n}/([^,]+)"
+    m = re.search(pat, markers_str, flags=re.IGNORECASE)
     return m.group(1).strip() if m else pd.NA
 
 
-# ------------------------
-# Reshape
-# ------------------------
+def _get_marker_labels_from_columns(row: pd.Series, marker_cols: list):
+    """Fallback for distributed marker columns. Returns raw strings if present."""
+    def is_pos(v):
+        s = str(v).strip()
+        return s not in ("", "-", "nan", "None")
+
+    positives = []
+    for c in marker_cols:
+        v = row.get(c, None)
+        if is_pos(v):
+            # keep raw
+            positives.append(str(v).strip())
+
+    # Heuristic fallback if needed
+    city_label = positives[0] if positives else pd.NA
+    state_label = positives[1] if len(positives) > 1 else pd.NA
+    return city_label, state_label
+
+
+# ==================
+# Reshape function
+# ==================
 
 def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups, wave_label="", survey_year="", col_index=None):
-    import re
-    import pandas as pd
-
+    """Emit CITY rows first, then STATE rows. Fill CITY_EVAL from markers blob. No cleaning."""
     if col_index is None:
-        # Build the resolver if not provided
-        def build_column_index(df: pd.DataFrame):
-            exact = set(df.columns)
-            lower_map = {}
-            collisions = set()
-            for c in df.columns:
-                key = c.lower()
-                if key in lower_map and lower_map[key] != c:
-                    collisions.add(key)
-                else:
-                    lower_map[key] = c
-            for k in collisions:
-                lower_map.pop(k, None)
-            return {"exact": exact, "lower_map": lower_map, "collisions": collisions}
-
         col_index = build_column_index(df)
 
-    def resolve_col(name: str, col_index):
-        if name in col_index["exact"]:
-            return name
-        return col_index["lower_map"].get(name.lower(), None)
-
-    # Split mapping groups
     mapping1, mapping2 = original_to_final_groups  # mapping1 = CITY group, mapping2 = STATE group
-
-    # Helper to find actual column by lowercase key
     lower_to_actual = {c.lower(): c for c in df.columns}
 
-    # Try to resolve 'markers' column case-insensitively
-    markers_col = resolve_col("markers", col_index)
+    # Prefer a true blob 'markers' column, else distributed markers
+    markers_blob_col = resolve_col("markers", col_index)
+    marker_cols = [c for c in df.columns if re.match(r"(conditionsmarker_|marker_)", str(c), flags=re.IGNORECASE)]
 
-    # Static source keys are those without lr-dest tokens
     static_keys = [k for k in full_map.keys() if not re.search(r"lr\d+", str(k), flags=re.IGNORECASE)]
-
-    def _get_marker_label(markers_str, label_type, n):
-        if not isinstance(markers_str, str) or not markers_str:
-            return pd.NA
-        m = re.search(rf"{label_type}\s*{n}/([^,]+)", markers_str, flags=re.IGNORECASE)
-        return m.group(1).strip() if m else pd.NA
 
     city_records = []
     state_records = []
 
-    # Iterate respondents in file order
     for _, row in df.iterrows():
-        # Determine which destinations are present for each group
+        # Which destinations are present for each group
         found_dests_1 = set()
         found_dests_2 = set()
 
@@ -253,7 +264,7 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                 if m:
                     found_dests_2.add(m.group(1).lower())
 
-        # Build static fields once
+        # Static fields once
         static_row = {}
         for src in static_keys:
             actual_src = resolve_col(src, col_index)
@@ -266,11 +277,20 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
         static_row["Wave"] = wave_label or pd.NA
         static_row["HIDE Help"] = survey_year or pd.NA
 
-        markers_str = str(row.get(markers_col, "")) if markers_col else ""
+        # Build label getters. Always use "1" per your rule.
+        if markers_blob_col:
+            markers_str = str(row.get(markers_blob_col, "")) if pd.notna(row.get(markers_blob_col, None)) else ""
+            get_city_label = lambda: _get_marker_label_from_blob(markers_str, "Destination", 1)
+            get_state_label = lambda: _get_marker_label_from_blob(markers_str, "State", 1)
+        else:
+            # distributed markers fallback
+            _city_fallback, _state_fallback = _get_marker_labels_from_columns(row, marker_cols)
+            get_city_label = lambda: _city_fallback
+            get_state_label = lambda: _state_fallback
 
-        # CITY block first (group 1)
+        # CITY block first
+        # You said one hit per respondent, but keep sort for safety
         for dest in sorted(found_dests_1, key=lambda s: int(re.search(r"\d+", s).group(0))):
-            n = int(re.search(r"\d+", dest).group(0))
             row_out = static_row.copy()
 
             for original_lower, final in mapping1.items():
@@ -281,14 +301,13 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     if pd.notna(val):
                         row_out[final] = val
 
-            row_out["CITY_EVAL"] = _get_marker_label(markers_str, "Destination", n)
+            row_out["CITY_EVAL"] = get_city_label()
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
             city_records.append(row_out)
 
-        # STATE block second (group 2)
+        # STATE block second
         for dest in sorted(found_dests_2, key=lambda s: int(re.search(r"\d+", s).group(0))):
-            n = int(re.search(r"\d+", dest).group(0))
             row_out = static_row.copy()
 
             for original_lower, final in mapping2.items():
@@ -299,24 +318,20 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     if pd.notna(val):
                         row_out[final] = val
 
-            # Per your instruction, write STATE label into CITY_EVAL as well
-            row_out["CITY_EVAL"] = _get_marker_label(markers_str, "State", n)
+            # Write the state label into CITY_EVAL per your instruction
+            row_out["CITY_EVAL"] = get_state_label()
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
             state_records.append(row_out)
 
-    # Concatenate CITY section first, then STATE section for the whole file
-    records = city_records + state_records
-    reshaped_df = pd.DataFrame(records)
-
-    # Keep expected columns, including Wave, HIDE Help, CITY_EVAL
+    reshaped_df = pd.DataFrame(city_records + state_records)
     reshaped_df = reshaped_df.reindex(columns=list(dict.fromkeys(final_column_order)))
     return reshaped_df
 
 
-# ------------------------
+# =====
 # Main
-# ------------------------
+# =====
 
 if __name__ == "__main__":
     mapping_file = "DataMapping.xlsx"
@@ -335,7 +350,6 @@ if __name__ == "__main__":
     )
 
     print(f"Reshaped data: {reshaped_df.shape[0]} rows, {reshaped_df.shape[1]} columns")
-    safe_wave_label = wave_label.replace(" ", "_") if wave_label else "output"
     output_file = f"{wave_label} SATS+ Output.xlsx" if wave_label else "SATS_final_output.xlsx"
     reshaped_df.to_excel(output_file, index=False)
     print(f"Output written to: {output_file}")
