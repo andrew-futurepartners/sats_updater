@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Add requirements.txt" />
+    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Update to Streamlit - UI Remove Weight" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -140,7 +140,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755673560420</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="Update to Streamlit - UI Remove Weight">
+      <option name="closed" value="true" />
+      <created>1755674273543</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1755674273544</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
@@ -149,6 +157,7 @@
     <MESSAGE value="ALL ASPECTS WORKING" />
     <MESSAGE value="Add Steamlit app.py" />
     <MESSAGE value="Add requirements.txt" />
-    <option name="LAST_COMMIT_MESSAGE" value="Add requirements.txt" />
+    <MESSAGE value="Update to Streamlit - UI Remove Weight" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update to Streamlit - UI Remove Weight" />
   </component>
 </project>
