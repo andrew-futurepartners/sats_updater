@@ -91,33 +91,17 @@ def parse_data_mapping(mapping_file_path):
     return standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order
 
 
-# ===========================
-# SATS file loading utility
-# ===========================
-
-def _load_sats_dataframe(sats_file_like, sheet_name=None):
-    """Return (df, chosen_sheet). Prefer a sheet that contains a 'markers' column."""
-    xls = pd.ExcelFile(sats_file_like)
-    sheet_list = xls.sheet_names if sheet_name is None else [sheet_name]
-
-    for sn in sheet_list:
-        df_try = pd.read_excel(sats_file_like, sheet_name=sn)
-        if any(str(c).strip().lower() == "markers" for c in df_try.columns):
-            return df_try, sn
-
-    first_sn = sheet_list[0]
-    return pd.read_excel(sats_file_like, sheet_name=first_sn), first_sn
-
-
 # =======================
 # Destination utilities
 # =======================
 
-def extract_destination_codes(df: pd.DataFrame):
+def extract_destination_codes_from_headers(headers):
     dest_pattern = re.compile(r"_lr(\d+)", re.IGNORECASE)
     dest_nums = set()
-    for col in df.columns:
-        m = dest_pattern.search(col)
+    for col in headers:
+        if not col:
+            continue
+        m = dest_pattern.search(str(col))
         if m:
             dest_nums.add(int(m.group(1)))
     return [f"lr{n}" for n in sorted(dest_nums)]  # lr1, lr2, ...
@@ -148,23 +132,115 @@ def expand_pattern_columns(pattern_mappings, dest_codes):
     return expanded
 
 
+# ===========================
+# Header sniffing, low memory
+# ===========================
+
+def sniff_sheet_and_headers(xls_file_like):
+    """
+    Return (chosen_sheet_name, headers_list).
+    Prefer the first sheet that contains a 'markers' column.
+    Uses openpyxl read_only to avoid loading the whole sheet.
+    """
+    from openpyxl import load_workbook
+
+    # reset pointer in case this is an UploadedFile
+    try:
+        xls_file_like.seek(0)
+    except Exception:
+        pass
+
+    wb = load_workbook(xls_file_like, read_only=True, data_only=True)
+    chosen_sheet = None
+    headers = None
+
+    for ws in wb.worksheets:
+        row_iter = ws.iter_rows(min_row=1, max_row=1, values_only=True)
+        first_row = next(row_iter, None)
+        cols = [str(c).strip() if c is not None else "" for c in (first_row or [])]
+        if any(h.lower() == "markers" for h in cols if h):
+            chosen_sheet = ws.title
+            headers = cols
+            break
+
+    if chosen_sheet is None:
+        ws = wb.worksheets[0]
+        row_iter = ws.iter_rows(min_row=1, max_row=1, values_only=True)
+        first_row = next(row_iter, None)
+        headers = [str(c).strip() if c is not None else "" for c in (first_row or [])]
+        chosen_sheet = ws.title
+
+    wb.close()
+
+    # reset again for pandas
+    try:
+        xls_file_like.seek(0)
+    except Exception:
+        pass
+
+    return chosen_sheet, headers
+
+
 # ==============================
 # Build mapping and data bundle
 # ==============================
 
 def build_full_mapping(mapping_file_path, sats_file_like, wave_label="", sheet_name=None):
     """
-    wave_label is provided by the UI and used to set Wave and HIDE Help (year).
+    Memory friendly loader:
+    1) parse mapping
+    2) sniff headers and pick sheet with markers
+    3) compute dest codes from headers
+    4) build list of required columns
+    5) read only those columns with pandas.read_excel(usecols=...)
     """
     standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order = parse_data_mapping(mapping_file_path)
 
-    df, chosen_sheet = _load_sats_dataframe(sats_file_like, sheet_name=sheet_name)
-    col_index = build_column_index(df)
+    # 1) header sniff
+    chosen_sheet, headers = sniff_sheet_and_headers(sats_file_like)
+    headers_lower_map = {str(h).strip().lower(): h for h in headers if h}
 
-    dest_codes = extract_destination_codes(df)
+    # 2) dest codes from headers
+    dest_codes = extract_destination_codes_from_headers(headers)
+
+    # 3) expand patterns with discovered dest codes
     expanded_1 = expand_pattern_columns(pattern_mappings_1, dest_codes)
     expanded_2 = expand_pattern_columns(pattern_mappings_2, dest_codes)
 
+    # 4) build required columns set from headers
+    needed = set()
+
+    # static originals
+    for k in standard_mappings.keys():
+        h = headers_lower_map.get(str(k).lower())
+        if h:
+            needed.add(h)
+
+    # expanded originals (pattern-based)
+    for k in list(expanded_1.keys()) + list(expanded_2.keys()):
+        h = headers_lower_map.get(k.lower())
+        if h:
+            needed.add(h)
+
+    # markers is required
+    h_markers = headers_lower_map.get("markers")
+    if h_markers:
+        needed.add(h_markers)
+
+    # If nothing matched, fall back to reading all columns of the sheet
+    usecols = list(needed) if needed else None
+
+    # 5) read the sheet with restricted columns
+    # reset pointer for pandas
+    try:
+        sats_file_like.seek(0)
+    except Exception:
+        pass
+
+    df = pd.read_excel(sats_file_like, sheet_name=chosen_sheet, usecols=usecols)
+    col_index = build_column_index(df)
+
+    # Merge all mappings
     full_mapping = {}
     full_mapping.update({k: v for k, v in standard_mappings.items()})
     full_mapping.update(expanded_1)
@@ -347,6 +423,7 @@ if submitted:
         st.error(f"Mapping file not found at '{MAPPING_PATH}'. Set MAPPING_PATH env var or place DataMapping.xlsx in the app folder.")
         st.stop()
 
+    # Build mapping and load only the needed columns
     fm, dest_codes, df_raw, cols_raw, final_order, groups, wave_label, survey_year, col_index = build_full_mapping(
         MAPPING_PATH, sats_file, wave_input.strip()
     )
