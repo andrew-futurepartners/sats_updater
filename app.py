@@ -2,13 +2,10 @@ import os
 import re
 import io
 import pandas as pd
+import streamlit as st
 
-# Optional Streamlit UI
-try:
-    import streamlit as st  # only used if running under Streamlit
-    _STREAMLIT_AVAILABLE = True
-except Exception:
-    _STREAMLIT_AVAILABLE = False
+# Repo path for the mapping file
+MAPPING_PATH = os.environ.get("MAPPING_PATH", "DataMapping.xlsx")
 
 
 # =========================
@@ -98,18 +95,18 @@ def parse_data_mapping(mapping_file_path):
 # SATS file loading utility
 # ===========================
 
-def _load_sats_dataframe(sats_file_path, sheet_name=None):
+def _load_sats_dataframe(sats_file_like, sheet_name=None):
     """Return (df, chosen_sheet). Prefer a sheet that contains a 'markers' column."""
-    xls = pd.ExcelFile(sats_file_path)
+    xls = pd.ExcelFile(sats_file_like)
     sheet_list = xls.sheet_names if sheet_name is None else [sheet_name]
 
     for sn in sheet_list:
-        df_try = pd.read_excel(sats_file_path, sheet_name=sn)
+        df_try = pd.read_excel(sats_file_like, sheet_name=sn)
         if any(str(c).strip().lower() == "markers" for c in df_try.columns):
             return df_try, sn
 
     first_sn = sheet_list[0]
-    return pd.read_excel(sats_file_path, sheet_name=first_sn), first_sn
+    return pd.read_excel(sats_file_like, sheet_name=first_sn), first_sn
 
 
 # =======================
@@ -155,10 +152,13 @@ def expand_pattern_columns(pattern_mappings, dest_codes):
 # Build mapping and data bundle
 # ==============================
 
-def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
+def build_full_mapping(mapping_file_path, sats_file_like, wave_label="", sheet_name=None):
+    """
+    wave_label is provided by the UI and used to set Wave and HIDE Help (year).
+    """
     standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order = parse_data_mapping(mapping_file_path)
 
-    df, chosen_sheet = _load_sats_dataframe(sats_file_path, sheet_name=sheet_name)
+    df, chosen_sheet = _load_sats_dataframe(sats_file_like, sheet_name=sheet_name)
     col_index = build_column_index(df)
 
     dest_codes = extract_destination_codes(df)
@@ -170,18 +170,9 @@ def build_full_mapping(mapping_file_path, sats_file_path, sheet_name=0):
     full_mapping.update(expanded_1)
     full_mapping.update(expanded_2)
 
-    base_name = os.path.basename(sats_file_path) if isinstance(sats_file_path, str) else getattr(sats_file_path, "name", "")
-    wave_label = ""
-    survey_year = ""
-
-    wave_match = re.search(r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})",
-                           base_name, flags=re.IGNORECASE)
-    year_match = re.search(r"\b(20\d{2})\b", base_name)
-
-    if wave_match:
-        wave_label = wave_match.group(0).title()
-    if year_match:
-        survey_year = year_match.group(1)
+    # Derive year from wave text like "June 2025"
+    m_year = re.search(r"\b(20\d{2})\b", wave_label or "")
+    survey_year = m_year.group(1) if m_year else ""
 
     for extra in ["Wave", "HIDE Help", "CITY_EVAL"]:
         if extra not in final_column_order:
@@ -223,10 +214,8 @@ def _get_marker_labels_from_columns(row: pd.Series, marker_cols: list):
     for c in marker_cols:
         v = row.get(c, None)
         if is_pos(v):
-            # keep raw
             positives.append(str(v).strip())
 
-    # Heuristic fallback if needed
     city_label = positives[0] if positives else pd.NA
     state_label = positives[1] if len(positives) > 1 else pd.NA
     return city_label, state_label
@@ -297,7 +286,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
             get_state_label = lambda: _state_fallback
 
         # CITY block first
-        # You said one hit per respondent, but keep sort for safety
         for dest in sorted(found_dests_1, key=lambda s: int(re.search(r"\d+", s).group(0))):
             row_out = static_row.copy()
 
@@ -337,53 +325,42 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
     return reshaped_df
 
 
-# ================
-# Streamlit wrapper
-# ================
+# ===============
+# Streamlit UI
+# ===============
+st.title("SATS+ Reshaper")
+st.caption("Upload SATS data, type the Wave, download a clean output.")
 
-def _run_streamlit_app():
-    st.title("SATS+ Reshaper")
-    st.caption("Upload SATS data, type the Wave, download the output. Mapping is read from DataMapping.xlsx in the repo.")
-
+with st.form("sats_form"):
     sats_file = st.file_uploader("SATS datafile (xlsx or xls). Must include a 'markers' column", type=["xlsx", "xls"])
     wave_input = st.text_input("Wave (for example 'June 2025')", value="")
-    do_process = st.button("Process")
+    submitted = st.form_submit_button("Process")
 
-    if not do_process:
-        return
-
+if submitted:
     if not sats_file:
         st.error("Please upload the SATS datafile.")
-        return
+        st.stop()
     if not wave_input.strip():
         st.error("Wave is required.")
-        return
+        st.stop()
+    if not os.path.exists(MAPPING_PATH):
+        st.error(f"Mapping file not found at '{MAPPING_PATH}'. Set MAPPING_PATH env var or place DataMapping.xlsx in the app folder.")
+        st.stop()
 
-    mapping_file = "DataMapping.xlsx"
-    if not os.path.exists(mapping_file):
-        st.error("DataMapping.xlsx not found in the working directory.")
-        return
-
-    # Build mapping and load data
-    fm, dest_codes, df, all_columns, final_column_order, groups, wave_label, survey_year, col_index = build_full_mapping(
-        mapping_file, sats_file
+    fm, dest_codes, df_raw, cols_raw, final_order, groups, wave_label, survey_year, col_index = build_full_mapping(
+        MAPPING_PATH, sats_file, wave_input.strip()
     )
 
-    # Override wave based on user input, and parse year from it
-    wave_label = wave_input.strip()
-    m = re.search(r"\b(20\d{2})\b", wave_label)
-    survey_year = m.group(1) if m else survey_year
+    out_df = reshape_sats_data(df_raw, fm, dest_codes, final_order, groups, wave_label, survey_year, col_index)
 
-    # Reshape
-    out_df = reshape_sats_data(df, fm, dest_codes, final_column_order, groups, wave_label, survey_year, col_index)
+    # File name: "SATS+ <Wave>.xlsx"
+    safe_wave = re.sub(r"[^\w\s\-\.]", "", wave_label).strip()
+    out_name = f"SATS+ {safe_wave}.xlsx" if safe_wave else "SATS+ Output.xlsx"
 
-    # Download
-    out_name = f"{wave_label} SATS+ Output.xlsx" if wave_label else "SATS_final_output.xlsx"
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as xw:
         out_df.to_excel(xw, index=False, sheet_name="SATS+")
     st.download_button("Download Output Excel", data=buf.getvalue(), file_name=out_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    # Quick preview
     st.write("Preview")
     st.dataframe(out_df.head(10))
