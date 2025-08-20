@@ -186,47 +186,74 @@ def _get_marker_label(markers_str, label_type, n):
 # ------------------------
 
 def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_final_groups, wave_label="", survey_year="", col_index=None):
+    import re
+    import pandas as pd
+
     if col_index is None:
+        # Build the resolver if not provided
+        def build_column_index(df: pd.DataFrame):
+            exact = set(df.columns)
+            lower_map = {}
+            collisions = set()
+            for c in df.columns:
+                key = c.lower()
+                if key in lower_map and lower_map[key] != c:
+                    collisions.add(key)
+                else:
+                    lower_map[key] = c
+            for k in collisions:
+                lower_map.pop(k, None)
+            return {"exact": exact, "lower_map": lower_map, "collisions": collisions}
+
         col_index = build_column_index(df)
 
-    mapping1, mapping2 = original_to_final_groups
-    records = []
+    def resolve_col(name: str, col_index):
+        if name in col_index["exact"]:
+            return name
+        return col_index["lower_map"].get(name.lower(), None)
 
-    # Cache a resolver for pattern keys (they are lowercased)
-    lower_to_actual = {}
-    for c in df.columns:
-        lower_to_actual[c.lower()] = c
+    # Split mapping groups
+    mapping1, mapping2 = original_to_final_groups  # mapping1 = CITY group, mapping2 = STATE group
 
-    # Try to resolve 'markers' column
+    # Helper to find actual column by lowercase key
+    lower_to_actual = {c.lower(): c for c in df.columns}
+
+    # Try to resolve 'markers' column case-insensitively
     markers_col = resolve_col("markers", col_index)
 
-    # Precompute static (non-destination) keys from full_map
+    # Static source keys are those without lr-dest tokens
     static_keys = [k for k in full_map.keys() if not re.search(r"lr\d+", str(k), flags=re.IGNORECASE)]
 
+    def _get_marker_label(markers_str, label_type, n):
+        if not isinstance(markers_str, str) or not markers_str:
+            return pd.NA
+        m = re.search(rf"{label_type}\s*{n}/([^,]+)", markers_str, flags=re.IGNORECASE)
+        return m.group(1).strip() if m else pd.NA
+
+    city_records = []
+    state_records = []
+
+    # Iterate respondents in file order
     for _, row in df.iterrows():
-        # Found destinations per group by checking non-null values
+        # Determine which destinations are present for each group
         found_dests_1 = set()
         found_dests_2 = set()
 
         for original_lower in mapping1.keys():
             actual = lower_to_actual.get(original_lower)
-            if actual is not None:
-                val = row.get(actual, None)
-                if pd.notna(val):
-                    m = re.search(r"(lr\d+)", original_lower, flags=re.IGNORECASE)
-                    if m:
-                        found_dests_1.add(m.group(1).lower())
+            if actual is not None and pd.notna(row.get(actual, None)):
+                m = re.search(r"(lr\d+)", original_lower, flags=re.IGNORECASE)
+                if m:
+                    found_dests_1.add(m.group(1).lower())
 
         for original_lower in mapping2.keys():
             actual = lower_to_actual.get(original_lower)
-            if actual is not None:
-                val = row.get(actual, None)
-                if pd.notna(val):
-                    m = re.search(r"(lr\d+)", original_lower, flags=re.IGNORECASE)
-                    if m:
-                        found_dests_2.add(m.group(1).lower())
+            if actual is not None and pd.notna(row.get(actual, None)):
+                m = re.search(r"(lr\d+)", original_lower, flags=re.IGNORECASE)
+                if m:
+                    found_dests_2.add(m.group(1).lower())
 
-        # Static fields
+        # Build static fields once
         static_row = {}
         for src in static_keys:
             actual_src = resolve_col(src, col_index)
@@ -241,10 +268,11 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
 
         markers_str = str(row.get(markers_col, "")) if markers_col else ""
 
-        # Group 1, city evaluations
+        # CITY block first (group 1)
         for dest in sorted(found_dests_1, key=lambda s: int(re.search(r"\d+", s).group(0))):
             n = int(re.search(r"\d+", dest).group(0))
             row_out = static_row.copy()
+
             for original_lower, final in mapping1.items():
                 target_lower = re.sub(r"lr\d+", dest, original_lower, flags=re.IGNORECASE)
                 actual = lower_to_actual.get(target_lower)
@@ -252,15 +280,17 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     val = row.get(actual, None)
                     if pd.notna(val):
                         row_out[final] = val
+
             row_out["CITY_EVAL"] = _get_marker_label(markers_str, "Destination", n)
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
-            records.append(row_out)
+            city_records.append(row_out)
 
-        # Group 2, state evaluations, written to CITY_EVAL per instructions
+        # STATE block second (group 2)
         for dest in sorted(found_dests_2, key=lambda s: int(re.search(r"\d+", s).group(0))):
             n = int(re.search(r"\d+", dest).group(0))
             row_out = static_row.copy()
+
             for original_lower, final in mapping2.items():
                 target_lower = re.sub(r"lr\d+", dest, original_lower, flags=re.IGNORECASE)
                 actual = lower_to_actual.get(target_lower)
@@ -268,12 +298,18 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     val = row.get(actual, None)
                     if pd.notna(val):
                         row_out[final] = val
+
+            # Per your instruction, write STATE label into CITY_EVAL as well
             row_out["CITY_EVAL"] = _get_marker_label(markers_str, "State", n)
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
-            records.append(row_out)
+            state_records.append(row_out)
 
+    # Concatenate CITY section first, then STATE section for the whole file
+    records = city_records + state_records
     reshaped_df = pd.DataFrame(records)
+
+    # Keep expected columns, including Wave, HIDE Help, CITY_EVAL
     reshaped_df = reshaped_df.reindex(columns=list(dict.fromkeys(final_column_order)))
     return reshaped_df
 
