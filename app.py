@@ -91,17 +91,110 @@ def parse_data_mapping(mapping_file_path):
     return standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order
 
 
+# ===========================
+# Sheet sniffing
+# ===========================
+
+def _sniff_best_sheet(xls_file_like):
+    """
+    Choose the sheet named 'original' that also has 'markers' and at least one *_lrN column.
+    If none match that, choose the sheet with 'markers' and the most *_lrN columns.
+    If none have both, fall back to the first sheet with 'markers'.
+    Else use the first sheet.
+    """
+    from openpyxl import load_workbook
+
+    def norm(s):
+        if s is None:
+            return ""
+        s = str(s).replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+        return s.strip().lower()
+
+    try:
+        xls_file_like.seek(0)
+    except Exception:
+        pass
+
+    wb = load_workbook(xls_file_like, read_only=True, data_only=True)
+    dest_re = re.compile(r"_lr(\d+)", re.IGNORECASE)
+
+    first_sheet = wb.worksheets[0].title if wb.worksheets else None
+    fallback_markers = None
+    best = None  # tuple(score, sheet_name, headers)
+
+    for ws in wb.worksheets:
+        row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        headers = [str(v).strip() if v is not None else "" for v in row]
+        headers_norm = [norm(v) for v in headers]
+        has_markers = any(h == "markers" for h in headers_norm)
+        n_dest = sum(1 for h in headers if dest_re.search(h))
+        is_original_name = norm(ws.title) == "original"
+
+        if has_markers and n_dest > 0:
+            # score: prefer sheet named 'original', then more dest cols
+            score = (1 if is_original_name else 0, n_dest)
+            if best is None or score > best[0]:
+                best = (score, ws.title, headers)
+        elif has_markers and fallback_markers is None:
+            fallback_markers = (ws.title, headers)
+
+    wb.close()
+    try:
+        xls_file_like.seek(0)
+    except Exception:
+        pass
+
+    if best:
+        return best[1], best[2]
+    if fallback_markers:
+        return fallback_markers
+    if first_sheet:
+        # read headers for the first sheet again
+        wb = load_workbook(xls_file_like, read_only=True, data_only=True)
+        ws = wb[first_sheet]
+        row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        headers = [str(v).strip() if v is not None else "" for v in row]
+        wb.close()
+        try:
+            xls_file_like.seek(0)
+        except Exception:
+            pass
+        return first_sheet, headers
+    return None, []
+
+
+# ===========================
+# SATS file loading utility
+# ===========================
+
+def _load_sats_dataframe(sats_file_like, sheet_name=None):
+    """Return (df, chosen_sheet). Prefer the 'original' sheet that has markers and destination columns."""
+    if sheet_name:
+        df = pd.read_excel(sats_file_like, sheet_name=sheet_name)
+        return df, sheet_name
+
+    chosen_sheet, _ = _sniff_best_sheet(sats_file_like)
+    if chosen_sheet is None:
+        # fallback to pandas' first sheet
+        xls = pd.ExcelFile(sats_file_like)
+        chosen_sheet = xls.sheet_names[0]
+    try:
+        sats_file_like.seek(0)
+    except Exception:
+        pass
+    df = pd.read_excel(sats_file_like, sheet_name=chosen_sheet)
+    return df, chosen_sheet
+
+
 # =======================
 # Destination utilities
 # =======================
 
-def extract_destination_codes_from_headers(headers):
+def extract_destination_codes(df: pd.DataFrame):
     dest_pattern = re.compile(r"_lr(\d+)", re.IGNORECASE)
     dest_nums = set()
-    for col in headers:
-        if not col:
-            continue
-        m = dest_pattern.search(str(col))
+    for col in df.columns:
+        m = dest_pattern.search(col)
         if m:
             dest_nums.add(int(m.group(1)))
     return [f"lr{n}" for n in sorted(dest_nums)]  # lr1, lr2, ...
@@ -132,115 +225,23 @@ def expand_pattern_columns(pattern_mappings, dest_codes):
     return expanded
 
 
-# ===========================
-# Header sniffing, low memory
-# ===========================
-
-def sniff_sheet_and_headers(xls_file_like):
-    """
-    Return (chosen_sheet_name, headers_list).
-    Prefer the first sheet that contains a 'markers' column.
-    Uses openpyxl read_only to avoid loading the whole sheet.
-    """
-    from openpyxl import load_workbook
-
-    # reset pointer in case this is an UploadedFile
-    try:
-        xls_file_like.seek(0)
-    except Exception:
-        pass
-
-    wb = load_workbook(xls_file_like, read_only=True, data_only=True)
-    chosen_sheet = None
-    headers = None
-
-    for ws in wb.worksheets:
-        row_iter = ws.iter_rows(min_row=1, max_row=1, values_only=True)
-        first_row = next(row_iter, None)
-        cols = [str(c).strip() if c is not None else "" for c in (first_row or [])]
-        if any(h.lower() == "markers" for h in cols if h):
-            chosen_sheet = ws.title
-            headers = cols
-            break
-
-    if chosen_sheet is None:
-        ws = wb.worksheets[0]
-        row_iter = ws.iter_rows(min_row=1, max_row=1, values_only=True)
-        first_row = next(row_iter, None)
-        headers = [str(c).strip() if c is not None else "" for c in (first_row or [])]
-        chosen_sheet = ws.title
-
-    wb.close()
-
-    # reset again for pandas
-    try:
-        xls_file_like.seek(0)
-    except Exception:
-        pass
-
-    return chosen_sheet, headers
-
-
 # ==============================
 # Build mapping and data bundle
 # ==============================
 
 def build_full_mapping(mapping_file_path, sats_file_like, wave_label="", sheet_name=None):
     """
-    Memory friendly loader:
-    1) parse mapping
-    2) sniff headers and pick sheet with markers
-    3) compute dest codes from headers
-    4) build list of required columns
-    5) read only those columns with pandas.read_excel(usecols=...)
+    wave_label is provided by the UI and used to set Wave and HIDE Help (year).
     """
     standard_mappings, pattern_mappings_1, pattern_mappings_2, final_column_order = parse_data_mapping(mapping_file_path)
 
-    # 1) header sniff
-    chosen_sheet, headers = sniff_sheet_and_headers(sats_file_like)
-    headers_lower_map = {str(h).strip().lower(): h for h in headers if h}
+    df, chosen_sheet = _load_sats_dataframe(sats_file_like, sheet_name=sheet_name)
+    col_index = build_column_index(df)
 
-    # 2) dest codes from headers
-    dest_codes = extract_destination_codes_from_headers(headers)
-
-    # 3) expand patterns with discovered dest codes
+    dest_codes = extract_destination_codes(df)
     expanded_1 = expand_pattern_columns(pattern_mappings_1, dest_codes)
     expanded_2 = expand_pattern_columns(pattern_mappings_2, dest_codes)
 
-    # 4) build required columns set from headers
-    needed = set()
-
-    # static originals
-    for k in standard_mappings.keys():
-        h = headers_lower_map.get(str(k).lower())
-        if h:
-            needed.add(h)
-
-    # expanded originals (pattern-based)
-    for k in list(expanded_1.keys()) + list(expanded_2.keys()):
-        h = headers_lower_map.get(k.lower())
-        if h:
-            needed.add(h)
-
-    # markers is required
-    h_markers = headers_lower_map.get("markers")
-    if h_markers:
-        needed.add(h_markers)
-
-    # If nothing matched, fall back to reading all columns of the sheet
-    usecols = list(needed) if needed else None
-
-    # 5) read the sheet with restricted columns
-    # reset pointer for pandas
-    try:
-        sats_file_like.seek(0)
-    except Exception:
-        pass
-
-    df = pd.read_excel(sats_file_like, sheet_name=chosen_sheet, usecols=usecols)
-    col_index = build_column_index(df)
-
-    # Merge all mappings
     full_mapping = {}
     full_mapping.update({k: v for k, v in standard_mappings.items()})
     full_mapping.update(expanded_1)
@@ -273,8 +274,6 @@ def _get_marker_label_from_blob(markers_str: str, label_type: str, n: int):
     """
     if not isinstance(markers_str, str) or not markers_str:
         return pd.NA
-    # Allow leading slash, allow any prefix up to "Destination 1/" or "State 1/"
-    # Stop at the next comma
     pat = rf"(?:^|,)\s*/?[^,]*\b{label_type}\s*0*{n}/([^,]+)"
     m = re.search(pat, markers_str, flags=re.IGNORECASE)
     return m.group(1).strip() if m else pd.NA
@@ -306,10 +305,9 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
     if col_index is None:
         col_index = build_column_index(df)
 
-    mapping1, mapping2 = original_to_final_groups  # mapping1 = CITY group, mapping2 = STATE group
+    mapping1, mapping2 = original_to_final_groups
     lower_to_actual = {c.lower(): c for c in df.columns}
 
-    # Prefer a true blob 'markers' column, else distributed markers
     markers_blob_col = resolve_col("markers", col_index)
     marker_cols = [c for c in df.columns if re.match(r"(conditionsmarker_|marker_)", str(c), flags=re.IGNORECASE)]
 
@@ -319,7 +317,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
     state_records = []
 
     for _, row in df.iterrows():
-        # Which destinations are present for each group
         found_dests_1 = set()
         found_dests_2 = set()
 
@@ -337,7 +334,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                 if m:
                     found_dests_2.add(m.group(1).lower())
 
-        # Static fields once
         static_row = {}
         for src in static_keys:
             actual_src = resolve_col(src, col_index)
@@ -346,25 +342,20 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                 if pd.notna(val):
                     static_row[full_map[src]] = val
 
-        # Metadata
         static_row["Wave"] = wave_label or pd.NA
         static_row["HIDE Help"] = survey_year or pd.NA
 
-        # Build label getters. Always use "1" per your rule.
         if markers_blob_col:
             markers_str = str(row.get(markers_blob_col, "")) if pd.notna(row.get(markers_blob_col, None)) else ""
             get_city_label = lambda: _get_marker_label_from_blob(markers_str, "Destination", 1)
             get_state_label = lambda: _get_marker_label_from_blob(markers_str, "State", 1)
         else:
-            # distributed markers fallback
             _city_fallback, _state_fallback = _get_marker_labels_from_columns(row, marker_cols)
             get_city_label = lambda: _city_fallback
             get_state_label = lambda: _state_fallback
 
-        # CITY block first
         for dest in sorted(found_dests_1, key=lambda s: int(re.search(r"\d+", s).group(0))):
             row_out = static_row.copy()
-
             for original_lower, final in mapping1.items():
                 target_lower = re.sub(r"lr\d+", dest, original_lower, flags=re.IGNORECASE)
                 actual = lower_to_actual.get(target_lower)
@@ -372,16 +363,13 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     val = row.get(actual, None)
                     if pd.notna(val):
                         row_out[final] = val
-
             row_out["CITY_EVAL"] = get_city_label()
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
             city_records.append(row_out)
 
-        # STATE block second
         for dest in sorted(found_dests_2, key=lambda s: int(re.search(r"\d+", s).group(0))):
             row_out = static_row.copy()
-
             for original_lower, final in mapping2.items():
                 target_lower = re.sub(r"lr\d+", dest, original_lower, flags=re.IGNORECASE)
                 actual = lower_to_actual.get(target_lower)
@@ -389,8 +377,6 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
                     val = row.get(actual, None)
                     if pd.notna(val):
                         row_out[final] = val
-
-            # Write the state label into CITY_EVAL per your instruction
             row_out["CITY_EVAL"] = get_state_label()
             for col in final_column_order:
                 row_out.setdefault(col, pd.NA)
@@ -423,14 +409,12 @@ if submitted:
         st.error(f"Mapping file not found at '{MAPPING_PATH}'. Set MAPPING_PATH env var or place DataMapping.xlsx in the app folder.")
         st.stop()
 
-    # Build mapping and load only the needed columns
     fm, dest_codes, df_raw, cols_raw, final_order, groups, wave_label, survey_year, col_index = build_full_mapping(
         MAPPING_PATH, sats_file, wave_input.strip()
     )
 
     out_df = reshape_sats_data(df_raw, fm, dest_codes, final_order, groups, wave_label, survey_year, col_index)
 
-    # File name: "SATS+ <Wave>.xlsx"
     safe_wave = re.sub(r"[^\w\s\-\.]", "", wave_label).strip()
     out_name = f"SATS+ {safe_wave}.xlsx" if safe_wave else "SATS+ Output.xlsx"
 

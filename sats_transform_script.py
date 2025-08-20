@@ -335,7 +335,7 @@ def reshape_sats_data(df, full_map, dest_codes, final_column_order, original_to_
 
 if __name__ == "__main__":
     mapping_file = "DataMapping.xlsx"
-    sats_file = "SATS JUNE 2025 example.xlsx"
+    sats_file = "SATS JUNE 2025 DATA.xlsx"
 
     print("Building full mapping and loading data...")
     full_map, dest_codes, df, all_columns, final_column_order, original_to_final_groups, wave_label, survey_year, col_index = build_full_mapping(

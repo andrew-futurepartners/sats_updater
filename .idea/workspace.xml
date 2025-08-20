@@ -4,7 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Update to Streamlit - Debug Attempt 3" />
+    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Update to Streamlit - Debug Attempt 4">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/June 2025 SATS+ Output.xlsx" beforeDir="false" afterPath="$PROJECT_DIR$/June 2025 SATS+ Output.xlsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/SATS JUNE 2025 DATA - FINAL CLEANED DATA.xlsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sats_transform_script.py" beforeDir="false" afterPath="$PROJECT_DIR$/sats_transform_script.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -172,7 +177,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755675325046</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="Update to Streamlit - Debug Attempt 4">
+      <option name="closed" value="true" />
+      <created>1755675782696</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1755675782696</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
@@ -185,6 +198,7 @@
     <MESSAGE value="Update to Streamlit - Debug Attempt 1" />
     <MESSAGE value="Update to Streamlit - Debug Attempt 2" />
     <MESSAGE value="Update to Streamlit - Debug Attempt 3" />
-    <option name="LAST_COMMIT_MESSAGE" value="Update to Streamlit - Debug Attempt 3" />
+    <MESSAGE value="Update to Streamlit - Debug Attempt 4" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update to Streamlit - Debug Attempt 4" />
   </component>
 </project>
