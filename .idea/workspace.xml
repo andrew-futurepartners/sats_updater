@@ -4,10 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Updated City/State respondent order">
+    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="ALL ASPECTS WORKING">
+      <change afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/June 2025 SATS+ Output.xlsx" beforeDir="false" afterPath="$PROJECT_DIR$/June 2025 SATS+ Output.xlsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sats_transform_script.py" beforeDir="false" afterPath="$PROJECT_DIR$/sats_transform_script.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -120,12 +119,21 @@
       <option name="project" value="LOCAL" />
       <updated>1755671059857</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="ALL ASPECTS WORKING">
+      <option name="closed" value="true" />
+      <created>1755672184298</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1755672184298</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Updated Q2 Function" />
     <MESSAGE value="Updated City/State respondent order" />
-    <option name="LAST_COMMIT_MESSAGE" value="Updated City/State respondent order" />
+    <MESSAGE value="ALL ASPECTS WORKING" />
+    <option name="LAST_COMMIT_MESSAGE" value="ALL ASPECTS WORKING" />
   </component>
 </project>
