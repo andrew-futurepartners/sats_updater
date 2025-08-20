@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="ALL ASPECTS WORKING">
-      <change afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-    </list>
+    <list default="true" id="8fd7b372-941d-4b8a-a5cf-396966d6da39" name="Changes" comment="Add requirements.txt" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -127,13 +124,31 @@
       <option name="project" value="LOCAL" />
       <updated>1755672184298</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="Add Steamlit app.py">
+      <option name="closed" value="true" />
+      <created>1755673368588</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1755673368589</updated>
+    </task>
+    <task id="LOCAL-00005" summary="Add requirements.txt">
+      <option name="closed" value="true" />
+      <created>1755673560420</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1755673560420</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Updated Q2 Function" />
     <MESSAGE value="Updated City/State respondent order" />
     <MESSAGE value="ALL ASPECTS WORKING" />
-    <option name="LAST_COMMIT_MESSAGE" value="ALL ASPECTS WORKING" />
+    <MESSAGE value="Add Steamlit app.py" />
+    <MESSAGE value="Add requirements.txt" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add requirements.txt" />
   </component>
 </project>
